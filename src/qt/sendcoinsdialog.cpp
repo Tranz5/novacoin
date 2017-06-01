@@ -2,6 +2,7 @@
 #include "ui_sendcoinsdialog.h"
 
 #include "init.h"
+#include "base58.h"
 #include "walletmodel.h"
 #include "addresstablemodel.h"
 #include "addressbookpage.h"
@@ -11,6 +12,7 @@
 #include "optionsmodel.h"
 #include "sendcoinsentry.h"
 #include "guiutil.h"
+#include "dialogwindowflags.h"
 #include "askpassphrasedialog.h"
 
 #include "coincontrol.h"
@@ -23,9 +25,10 @@
 #include <QClipboard>
 
 SendCoinsDialog::SendCoinsDialog(QWidget *parent) :
-    QDialog(parent),
+    QDialog(parent, DIALOGWINDOWHINTS),
     ui(new Ui::SendCoinsDialog),
-    model(0)
+    model(0),
+    coinControl(0)
 {
     ui->setupUi(this);
 
@@ -77,6 +80,9 @@ SendCoinsDialog::SendCoinsDialog(QWidget *parent) :
     ui->labelCoinControlChange->addAction(clipboardChangeAction);
 
     fNewRecipientAllowed = true;
+
+    coinControl = new CoinControlDialog(0);
+    connect(coinControl, SIGNAL(beforeClose()), this, SLOT(coinControlUpdateLabels()));
 }
 
 void SendCoinsDialog::setModel(WalletModel *model)
@@ -108,6 +114,7 @@ void SendCoinsDialog::setModel(WalletModel *model)
 
 SendCoinsDialog::~SendCoinsDialog()
 {
+    delete coinControl;
     delete ui;
 }
 
@@ -124,12 +131,12 @@ void SendCoinsDialog::on_sendButton_clicked()
         if(!ui->lineEditCoinControlChange->hasAcceptableInput() ||
            (model && !model->validateAddress(ui->lineEditCoinControlChange->text())))
         {
-            CoinControlDialog::coinControl->destChange = CNoDestination();
+            CoinControlDialog::coinControl->destChange = CBitcoinAddress();
             ui->lineEditCoinControlChange->setValid(false);
             valid = false;
         }
         else
-            CoinControlDialog::coinControl->destChange = CBitcoinAddress(ui->lineEditCoinControlChange->text().toStdString()).Get();
+            CoinControlDialog::coinControl->destChange = CBitcoinAddress(ui->lineEditCoinControlChange->text().toStdString());
     }
 
     for(int i = 0; i < ui->entries->count(); ++i)
@@ -157,7 +164,11 @@ void SendCoinsDialog::on_sendButton_clicked()
     QStringList formatted;
     foreach(const SendCoinsRecipient &rcp, recipients)
     {
+#if QT_VERSION < 0x050000
         formatted.append(tr("<b>%1</b> to %2 (%3)").arg(BitcoinUnits::formatWithUnit(BitcoinUnits::BTC, rcp.amount), Qt::escape(rcp.label), rcp.address));
+#else
+        formatted.append(tr("<b>%1</b> to %2 (%3)").arg(BitcoinUnits::formatWithUnit(BitcoinUnits::BTC, rcp.amount), rcp.label.toHtmlEscaped(), rcp.address));
+#endif
     }
 
     fNewRecipientAllowed = false;
@@ -439,10 +450,9 @@ void SendCoinsDialog::coinControlFeatureChanged(bool checked)
 // Coin Control: button inputs -> show actual coin control dialog
 void SendCoinsDialog::coinControlButtonClicked()
 {
-    CoinControlDialog dlg;
-    dlg.setModel(model);
-    dlg.exec();
-    coinControlUpdateLabels();
+    coinControl->setModel(model);
+    coinControl->setWindowModality(Qt::ApplicationModal);
+    coinControl->show();
 }
 
 // Coin Control: checkbox custom change address
@@ -451,9 +461,9 @@ void SendCoinsDialog::coinControlChangeChecked(int state)
     if (model)
     {
         if (state == Qt::Checked)
-            CoinControlDialog::coinControl->destChange = CBitcoinAddress(ui->lineEditCoinControlChange->text().toStdString()).Get();
+            CoinControlDialog::coinControl->destChange = CBitcoinAddress(ui->lineEditCoinControlChange->text().toStdString());
         else
-            CoinControlDialog::coinControl->destChange = CNoDestination();
+            CoinControlDialog::coinControl->destChange = CBitcoinAddress();
     }
 
     ui->lineEditCoinControlChange->setEnabled((state == Qt::Checked));
